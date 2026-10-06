@@ -1,4 +1,4 @@
-package com.pulseprice.scraper.services
+package com.pulseprice.scraper.service
 
 import com.pulseprice.common.model.ScrapeResult
 import com.pulseprice.scraper.extractor.JsonLdExtractor

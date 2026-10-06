@@ -6,6 +6,7 @@ plugins {
 
 dependencies {
     implementation(project(":pulse-common"))
+    implementation(project(":pulse-pipeline"))
 
     // Non-blocking WebClient & Reactive Redis
     implementation("org.springframework.boot:spring-boot-starter-webflux")
