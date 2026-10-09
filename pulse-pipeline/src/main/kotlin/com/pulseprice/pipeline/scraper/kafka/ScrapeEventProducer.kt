@@ -1,4 +1,4 @@
-package com.pulseprice.scraper.kafka
+package com.pulseprice.pipeline.scraper.kafka
 
 import com.pulseprice.common.event.RawScrapeEvent
 import kotlinx.coroutines.future.await
@@ -22,7 +22,7 @@ class ScrapeEventProducer(private val kafkaTemplate: KafkaTemplate<String, Any>)
             )
         }
         executionResult.onFailure { ex ->
-            log.error("Failed to publish RawscrapeEvent [id={}] to Kafka: {}", event.eventId, ex.message, ex)
+            log.error("Failed to publish RawScrapeEvent [id={}] to Kafka: {}", event.eventId, ex.message, ex)
         }
     }
 

@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: pulsepass
       POSTGRES_DB: pulseprice
     ports:
-      - "5432:5432"
+      - "5444:5432"
     volumes:
       - timescaledb_data:/var/lib/postgresql/data
       - ./init-scripts:/docker-entry-point-initdb.d:z
@@ -53,4 +53,3 @@ services:
       retries: 5
 volumes:
   timescaledb_data:
-  
