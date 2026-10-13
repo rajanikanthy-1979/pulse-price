@@ -5,15 +5,15 @@
 - **Target Stack:** Kotlin, Java 21, Spring Boot 4.x, Kotlin Coroutines, Jsoup, Playwright, Apache Kafka, PostgreSQL + TimescaleDB, Redis, OpenTelemetry, Prometheus, Grafana, React/Tailwind.
 
 ## 2. Multi-Phase Implementation Plan
-- [X] **Phase 1: Ingestion Engine & Sandbox Verification** (Current Phase)
+- [X] **Phase 1: Ingestion Engine & Sandbox Verification**
   - Scaffolding multi-module Gradle project in Kotlin & Spring Boot 3.
   - Core `RetailerScraper` strategy & non-blocking execution via Coroutines.
   - Per-domain Token Bucket rate-limiting using Redis.
   - WireMock integration tests for mocking HTTP 200, 429, 503, and price fluctuations.
-- [ ] **Phase 2: Decoupled Pipeline & Time-Series Storage**
+- [X] **Phase 2: Decoupled Pipeline & Time-Series Storage**
   - Docker Compose: Kafka, TimescaleDB, Redis.
   - Ingestion pipeline: `raw-scrapes` -> Parser -> UPC/GTIN canonical resolver -> `price_history` hypertable.
-- [ ] **Phase 3: Real-World Scrapers & Anti-Bot Hardening**
+- [ ] **Phase 3: Real-World Scrapers & Anti-Bot Hardening** (Current Phase)
   - Jsoup (JSON-LD / `__NEXT_DATA__`) fast path + Playwright headless fallback.
   - Dead-Letter Queue (DLQ) for DOM drift & selector validation.
 - [ ] **Phase 4: Price Drop Alerts & Metasearch API**
@@ -21,11 +21,11 @@
 - [ ] **Phase 5: Observability & Production Polish**
   - OpenTelemetry + Prometheus + Grafana dashboards.
 
-## 3. Current Sprint Deliverable (Phase 1)
-- Working multi-module build file (`build.gradle.kts`).
-- `RetailerScraper` interface & Jsoup/JSON-LD extractor.
-- Redis Token Bucket Rate Limiter.
-- WireMock automated integration tests validating non-blocking scraping and rate limits.
+## 3. Current Sprint Deliverable (Phase 3)
+- Tiered scraping architecture: Fast-Path (Jsoup + JSON-LD + `__NEXT_DATA__`) + Slow-Path (Playwright Headless browser fallback).
+- Anti-bot stealth hardening (navigator spoofing, WebGL masking, Sec-CH-UA emulation, aggressive asset request interception).
+- Dead-Letter Queue (DLQ) pipeline (`raw-scrapes-dlq`) with DOM drift detection, challenge classification, and TimescaleDB failure auditing.
+- Multi-retailer scraper implementations with confidence scoring and fallback routing.
 
 ## 4. Global Implementation Workflow & Instructions
 - **Subtask Breakdown:** Every phase must be broken down into granular subtasks.

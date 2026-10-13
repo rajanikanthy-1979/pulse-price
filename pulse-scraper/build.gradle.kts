@@ -12,9 +12,16 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-webflux")
     implementation("org.springframework.boot:spring-boot-starter-data-redis-reactive")
 
+    // Apache Kafka Producer
+    implementation("org.springframework.kafka:spring-kafka")
+
     // HTML parsing & extraction
     implementation("org.jsoup:jsoup:1.18.1")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
+    implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
+
+    // Headless Browser Automation (Playwright for Java)
+    implementation("com.microsoft.playwright:playwright:1.47.0")
 
     // Testing: WireMock & Testcontainers
     testImplementation("org.springframework.boot:spring-boot-starter-test")

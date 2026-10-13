@@ -1,10 +1,11 @@
 package com.pulseprice.common.model
 
 sealed interface ScrapeResult {
-    data class Success (
+    data class Success(
         val url: String,
         val payload: ProductRawPayload,
-        val latencyMs: Long
+        val latencyMs: Long,
+        val tier: ScrapeTier
     ) : ScrapeResult
 
     data class RateLimited(
@@ -17,6 +18,9 @@ sealed interface ScrapeResult {
         val url: String,
         val statusCode: Int?,
         val errorMessage: String,
+        val failureReason: ScrapeFailureReason = ScrapeFailureReason.HTTP_STATUS_ERROR,
         val isRetryable: Boolean = false,
+        val attemptedTiers: List<ScrapeTier> = emptyList(),
+        val rawSnippet: String? = null
     ) : ScrapeResult
 }
