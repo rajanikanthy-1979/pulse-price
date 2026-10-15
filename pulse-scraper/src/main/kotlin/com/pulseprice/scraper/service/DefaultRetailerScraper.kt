@@ -1,6 +1,7 @@
 package com.pulseprice.scraper.service
 
 import com.pulseprice.common.model.ScrapeResult
+import com.pulseprice.common.model.ScrapeTier
 import com.pulseprice.scraper.extractor.JsonLdExtractor
 import com.pulseprice.scraper.ratelimit.RedisTokenBucketRateLimiter
 import kotlinx.coroutines.Dispatchers
@@ -73,7 +74,8 @@ class DefaultRetailerScraper(
         return ScrapeResult.Success(
             url = targetUrl,
             payload = payload,
-            latencyMs = latency
+            latencyMs = latency,
+            tier = ScrapeTier.FAST_PATH_JSON_LD
         )
     }
 

@@ -2,6 +2,7 @@ package com.pulseprice.pipeline.config
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.pulseprice.common.event.RawScrapeEvent
+import com.pulseprice.common.event.ScrapeDeadLetterEvent
 import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.clients.producer.ProducerConfig
 import org.apache.kafka.common.serialization.StringDeserializer
@@ -50,6 +51,28 @@ class KafkaConsumerConfig(
         factory.consumerFactory = consumerFactory()
         factory.containerProperties.ackMode = ContainerProperties.AckMode.MANUAL_IMMEDIATE
         factory.setConcurrency(3)
+        return factory
+    }
+
+    @Bean
+    fun dlqConsumerFactory(): ConsumerFactory<String, ScrapeDeadLetterEvent> {
+        val props = mutableMapOf<String, Any>(
+            ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG to bootstrapServers,
+            ConsumerConfig.GROUP_ID_CONFIG to "pulse-dlq-audit-group",
+            ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG to false,
+            ConsumerConfig.AUTO_OFFSET_RESET_CONFIG to "earliest"
+        )
+        val jsonDeserializer = JsonDeserializer(ScrapeDeadLetterEvent::class.java, objectMapper)
+        jsonDeserializer.ignoreTypeHeaders()
+        jsonDeserializer.trustedPackages("com.pulseprice.*")
+        return DefaultKafkaConsumerFactory(props, StringDeserializer(), ErrorHandlingDeserializer(jsonDeserializer))
+    }
+
+    @Bean
+    fun dlqKafkaListenerContainerFactory(): ConcurrentKafkaListenerContainerFactory<String, ScrapeDeadLetterEvent> {
+        val factory = ConcurrentKafkaListenerContainerFactory<String, ScrapeDeadLetterEvent>()
+        factory.consumerFactory = dlqConsumerFactory()
+        factory.containerProperties.ackMode = ContainerProperties.AckMode.MANUAL_IMMEDIATE
         return factory
     }
 

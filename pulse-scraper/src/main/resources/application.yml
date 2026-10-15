@@ -1,3 +1,6 @@
+server:
+  port: 8081
+
 spring:
   application:
     name: pulse-scraper
@@ -7,3 +10,10 @@ spring:
       port: ${REDIS_PORT:6379}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+scraper:
+  playwright:
+    headless: true
+    pool-size: 4
+    timeout-ms: 25000
+    slow-mo: 0.0
