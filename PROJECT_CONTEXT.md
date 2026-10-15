@@ -13,19 +13,20 @@
 - [X] **Phase 2: Decoupled Pipeline & Time-Series Storage**
   - Docker Compose: Kafka, TimescaleDB, Redis.
   - Ingestion pipeline: `raw-scrapes` -> Parser -> UPC/GTIN canonical resolver -> `price_history` hypertable.
-- [ ] **Phase 3: Real-World Scrapers & Anti-Bot Hardening** (Current Phase)
+- [X] **Phase 3: Real-World Scrapers & Anti-Bot Hardening**
   - Jsoup (JSON-LD / `__NEXT_DATA__`) fast path + Playwright headless fallback.
   - Dead-Letter Queue (DLQ) for DOM drift & selector validation.
-- [ ] **Phase 4: Price Drop Alerts & Metasearch API**
+- [ ] **Phase 4: Price Drop Alerts & Metasearch API** (Current Phase)
   - Alert engine (`price-drop-alerts`), subscription matches, REST endpoints (`/search`, `/compare`, `/history`).
 - [ ] **Phase 5: Observability & Production Polish**
   - OpenTelemetry + Prometheus + Grafana dashboards.
 
-## 3. Current Sprint Deliverable (Phase 3)
-- Tiered scraping architecture: Fast-Path (Jsoup + JSON-LD + `__NEXT_DATA__`) + Slow-Path (Playwright Headless browser fallback).
-- Anti-bot stealth hardening (navigator spoofing, WebGL masking, Sec-CH-UA emulation, aggressive asset request interception).
-- Dead-Letter Queue (DLQ) pipeline (`raw-scrapes-dlq`) with DOM drift detection, challenge classification, and TimescaleDB failure auditing.
-- Multi-retailer scraper implementations with confidence scoring and fallback routing.
+## 3. Current Sprint Deliverable (Phase 4)
+- **Submodule Scaffolding (`pulse-api`):** Reactive Spring Boot 3 WebFlux + R2DBC + Kafka + Redis multi-module integration.
+- **Alert Matching Engine:** Real-time stream processor consuming `canonical-prices`, evaluating user price drop thresholds, percentage drops, and all-time-low triggers with Redis cooldown deduplication.
+- **Notification Dispatch Pipeline:** Pluggable notification channel dispatchers (Webhook with HMAC signing, Email formatting, Server-Sent Events).
+- **Metasearch REST API:** High-performance non-blocking endpoints for fuzzy product search (PostgreSQL `pg_trgm`), cross-retailer real-time price comparison (`/compare`), and TimescaleDB time-bucket price history (`/history`).
+- **Database Schema (`03-alerts-and-api-schema.sql`):** Subscriptions, alert audit history, trigram search indexes, and continuous aggregate queries.
 
 ## 4. Global Implementation Workflow & Instructions
 - **Subtask Breakdown:** Every phase must be broken down into granular subtasks.
