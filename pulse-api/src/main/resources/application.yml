@@ -1,0 +1,60 @@
+server:
+  port: 8000
+  shutdown: graceful
+
+spring:
+  application:
+    name: pulse-ap
+
+# Reactive PostgreSQL / TimescaleDB Connection Pool
+r2dbc:
+  url: r2dbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5444}/${DB_NAME:pulseprice}
+  username: ${DB_USER:pulse}
+  password: ${DB_PASSWORD:pulsepass}
+  pool:
+    enabled: true
+    initial-size: 10
+    max-size: 50
+    max-idle-time: 30m
+    validation-query: SELECT 1
+
+  # Reactive Redis L1 Cache & Cooldown Store
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2000ms
+
+  # Apache Kafka Event Streaming
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: pulse-alert-engine-group
+      auto-offset-reset: latest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.trusted.packages: "com.pulseprice.*"
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      properties:
+        enable.idempotence: true
+
+pulse:
+  kafka:
+    topics:
+      canonical-prices: canonical-prices
+      price-drop-alerts: price-drop-alerts
+  alerts:
+    default-cooldown-hours: 24
+    webhook-timeout-ms: 4000
+    hmac-secret: ${PULSE_HMAC_SECRET:pulse-engine-super-secret-key-32bytes!}
+  cache:
+    search-ttl-seconds: 60
+    compare-ttl-seconds: 15
+    history-ttl-seconds: 120
