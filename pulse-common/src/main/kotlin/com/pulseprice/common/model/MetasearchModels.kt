@@ -38,6 +38,7 @@ data class RetailOfferDto (
     val inStock: Boolean,
     val priceDifferenceFromLowest: BigDecimal,
     val lastUpdated: Instant,
+    val isBestPrice: Boolean,
 )
 
 data class ProductComparisonResponse (
