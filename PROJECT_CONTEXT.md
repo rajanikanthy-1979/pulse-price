@@ -16,17 +16,16 @@
 - [X] **Phase 3: Real-World Scrapers & Anti-Bot Hardening**
   - Jsoup (JSON-LD / `__NEXT_DATA__`) fast path + Playwright headless fallback.
   - Dead-Letter Queue (DLQ) for DOM drift & selector validation.
-- [ ] **Phase 4: Price Drop Alerts & Metasearch API** (Current Phase)
+- [X] **Phase 4: Price Drop Alerts & Metasearch API**
   - Alert engine (`price-drop-alerts`), subscription matches, REST endpoints (`/search`, `/compare`, `/history`).
-- [ ] **Phase 5: Observability & Production Polish**
+- [ ] **Phase 5: Observability & Production Polish** (Current Phase)
   - OpenTelemetry + Prometheus + Grafana dashboards.
 
-## 3. Current Sprint Deliverable (Phase 4)
-- **Submodule Scaffolding (`pulse-api`):** Reactive Spring Boot 3 WebFlux + R2DBC + Kafka + Redis multi-module integration.
-- **Alert Matching Engine:** Real-time stream processor consuming `canonical-prices`, evaluating user price drop thresholds, percentage drops, and all-time-low triggers with Redis cooldown deduplication.
-- **Notification Dispatch Pipeline:** Pluggable notification channel dispatchers (Webhook with HMAC signing, Email formatting, Server-Sent Events).
-- **Metasearch REST API:** High-performance non-blocking endpoints for fuzzy product search (PostgreSQL `pg_trgm`), cross-retailer real-time price comparison (`/compare`), and TimescaleDB time-bucket price history (`/history`).
-- **Database Schema (`03-alerts-and-api-schema.sql`):** Subscriptions, alert audit history, trigram search indexes, and continuous aggregate queries.
+## 3. Current Sprint Deliverable (Phase 5)
+- **Observability Stack (`docker-compose.yml`):** OpenTelemetry Collector, Prometheus, Tempo (Distributed Tracing), and Grafana with automated datasource and dashboard provisioning.
+- **Distributed Tracing & Context Propagation:** End-to-end W3C TraceContext propagation across Kotlin Coroutines (`ReactorContext` / `MDCContext`), WebFlux HTTP requests, Kafka Producer/Consumer headers (`raw-scrapes` -> `canonical-prices` -> `price-drop-alerts`), R2DBC queries, and Redis operations.
+- **Custom Domain Metrics (`Micrometer` & `Prometheus`):** High-cardinality-safe business and operational metrics across `pulse-scraper` (tier distribution, anti-bot challenge rates, token bucket throttling, Playwright pool utilization), `pulse-pipeline` (GTIN canonical resolution hit/miss, hypertable ingestion latency, DLQ rates), and `pulse-api` (alert evaluation latency, notification channel dispatch counters, L1 Redis cache hit ratios).
+- **Production Readiness & Resilience:** Custom Spring Boot Actuator reactive health indicators (TimescaleDB, Redis, Kafka, Playwright browser health), structured JSON logging with `trace_id`/`span_id` correlation, and pre-built Grafana dashboards (`pulse-overview-dashboard.json`).
 
 ## 4. Global Implementation Workflow & Instructions
 - **Subtask Breakdown:** Every phase must be broken down into granular subtasks.
