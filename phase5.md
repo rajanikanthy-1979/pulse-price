@@ -1,6 +1,6 @@
 # Phase 5: Observability & Production Polish
 
-This document provides a comprehensive, production-grade implementation guide for **Phase 5: Observability & Production Polish**. It equips the distributed PulsePrice metasearch engine (`pulse-scraper`, `pulse-pipeline`, `pulse-api`) with end-to-end distributed tracing via **OpenTelemetry & Grafana Tempo**, low-cardinality business and operational telemetry via **Micrometer & Prometheus**, reactive infrastructure health checks via **Spring Boot Actuator**, structured JSON log correlation, and an automated **Grafana** observability dashboard.
+This document provides a comprehensive, production-grade implementation guide for **Phase 5: Observability & Production Polish**. It equips the distributed PulsePrice metasearch engine (`pulse-scraper`, `pulse-pipeline`, `pulse-api`) with end-to-end distributed tracing via **OpenTelemetry & Grafana Tempo**, centralized trace-correlated log aggregation via **Grafana Loki**, low-cardinality business and operational telemetry via **Micrometer & Prometheus**, reactive infrastructure health checks via **Spring Boot Actuator**, structured JSON log correlation, and an automated **Grafana** observability dashboard.
 
 Infrastructure is orchestrated using **Podman Compose** (`podman compose`) / **Docker Compose** (`docker compose`). In accordance with project instructions, all code and configurations are proposed in full for manual review and implementation.
 
@@ -12,7 +12,8 @@ Phase 5 introduces the **Unified Observability & Production Readiness Subsystem*
 1. **End-to-End W3C Trace Context Propagation:** Correlates a single price scrape from `pulse-scraper` (HTTP WebClient / Playwright fallback) $\rightarrow$ Kafka `raw-scrapes` $\rightarrow$ `pulse-pipeline` (Redis GTIN resolution + TimescaleDB R2DBC insert) $\rightarrow$ Kafka `canonical-prices` $\rightarrow$ `pulse-api` (Alert evaluation + Webhook/Email/SSE notification dispatch) under a **single distributed `traceId`**.
 2. **Coroutine-Safe Context Bridging:** Bridges Project Reactor's `ContextView`, SLF4J `MDC`, and Micrometer `ObservationRegistry` across Kotlin Coroutine suspension points (`ReactorContext` + `ObservationContextElement`) so threads switching between Netty event loops, Kafka consumer pools, and `Dispatchers.IO` never lose active trace spans.
 3. **High-Signal Custom Domain Metrics:** Exposes Prometheus counters, timers, and gauges for scraper tier distribution, anti-bot challenge detection rates, Redis token bucket throttling, GTIN canonical resolution cache hit ratios, TimescaleDB hypertable write latency, and alert channel delivery rates.
-4. **Zero-Touch Observability Stack:** Adds OpenTelemetry Collector, Prometheus, Grafana Tempo, and Grafana with pre-provisioned datasources and a complete 12-panel operational dashboard JSON.
+4. **Zero-Touch Observability Stack:** Adds OpenTelemetry Collector, Prometheus, Grafana Tempo, Grafana Loki, and Grafana with pre-provisioned datasources (Metrics ↔ Traces ↔ Logs linking) and a complete 12-panel operational dashboard JSON.
+5. **Unified OTLP Log Pipeline:** Every service ships its Logback events over OTLP to the OpenTelemetry Collector, which forwards them to Loki's native OTLP endpoint. `trace_id` / `span_id` travel as Loki structured metadata, so a log line jumps straight to its Tempo trace and a span jumps back to its logs.
 
 ```text
 pulse-price/
@@ -21,6 +22,7 @@ pulse-price/
 │   ├── otel-collector-config.yaml
 │   ├── prometheus.yml
 │   ├── tempo.yaml
+│   ├── loki.yaml
 │   └── grafana/
 │       ├── provisioning/
 │       │   ├── datasources/
@@ -42,7 +44,8 @@ pulse-price/
 │   └── src/main/
 │       ├── kotlin/com/pulseprice/scraper/
 │       │   ├── config/
-│       │   │   └── ScraperObservabilityConfig.kt
+│       │   │   ├── ScraperObservabilityConfig.kt
+│       │   │   └── OtlpLogExportConfig.kt
 │       │   ├── health/
 │       │   │   └── PlaywrightBrowserHealthIndicator.kt
 │       │   ├── metrics/
@@ -59,7 +62,8 @@ pulse-price/
 │       ├── kotlin/com/pulseprice/pipeline/
 │       │   ├── config/
 │       │   │   ├── KafkaConsumerConfig.kt        (Observation enabled)
-│       │   │   └── KafkaProducerConfig.kt        (Observation enabled)
+│       │   │   ├── KafkaProducerConfig.kt        (Observation enabled)
+│       │   │   └── OtlpLogExportConfig.kt
 │       │   ├── metrics/
 │       │   │   └── PipelineMetricsRecorder.kt
 │       │   ├── resolver/
@@ -78,7 +82,8 @@ pulse-price/
         ├── kotlin/com/pulseprice/api/
         │   ├── config/
         │   │   ├── ApiObservabilityConfig.kt
-        │   │   └── KafkaApiConfig.kt             (Observation enabled)
+        │   │   ├── KafkaApiConfig.kt             (Observation enabled)
+        │   │   └── OtlpLogExportConfig.kt
         │   ├── health/
         │   │   └── PulseInfrastructureHealthIndicator.kt
         │   ├── metrics/
@@ -95,20 +100,27 @@ pulse-price/
 
 ---
 
-## Subtask 5.1: Observability Infrastructure Stack (`docker-compose.yml`, OTel Collector, Prometheus, Tempo, Grafana)
+## Subtask 5.1: Observability Infrastructure Stack (`docker-compose.yml`, OTel Collector, Prometheus, Tempo, Loki, Grafana)
 
 ### 1. What We Are Doing
-We are extending `docker-compose.yml` with four production observability containers and their declarative configuration files under `observability/`:
-1. **OpenTelemetry Collector (`otel/opentelemetry-collector-contrib`):** Receives OTLP (gRPC `4317` / HTTP `4318`) traces and metrics from all three Spring Boot services, batches them, and exports traces to Tempo and metrics to Prometheus.
+We are extending `docker-compose.yml` with five production observability containers and their declarative configuration files under `observability/`:
+1. **OpenTelemetry Collector (`otel/opentelemetry-collector-contrib`):** Receives OTLP (gRPC `4317` / HTTP `4318`) traces, metrics, and logs from all three Spring Boot services, batches them, and exports traces to Tempo, metrics to Prometheus, and logs to Loki.
 2. **Grafana Tempo (`grafana/tempo`):** High-scale, object-storage-friendly distributed tracing backend that indexes trace IDs and stores spans without requiring a heavy Elasticsearch cluster.
 3. **Prometheus (`prom/prometheus`):** Scrapes `/actuator/prometheus` endpoints across `pulse-scraper:8081`, `pulse-pipeline:8082`, and `pulse-api:8000` (or `8080`), as well as the OTel Collector metrics exporter.
-4. **Grafana (`grafana/grafana`):** Pre-provisioned with Prometheus and Tempo datasources (including Trace-to-Logs and Exemplar linking) and a ready-to-use `pulse-overview-dashboard.json`.
+4. **Grafana Loki (`grafana/loki`):** Label-indexed log store. Only a handful of low-cardinality labels (`service_name`, `deployment_environment`) are indexed; high-cardinality fields such as `trace_id` and `span_id` are stored as **structured metadata** next to each line, so they are filterable without blowing up the index.
+5. **Grafana (`grafana/grafana`):** Pre-provisioned with Prometheus, Tempo, and Loki datasources (Exemplar → Trace, Trace → Logs, and Log → Trace linking) and a ready-to-use `pulse-overview-dashboard.json`.
 
 ### 2. Why We Are Doing It & Deep Mechanics
 
 #### Why Decouple Services from Backends with the OpenTelemetry Collector?
 - **Vendor-Agnostic Instrumentation:** If application services export spans directly to Jaeger, Zipkin, or Datadog, changing backends requires recompiling and redeploying every microservice. By speaking standard **OTLP (OpenTelemetry Protocol)** to a local collector agent, microservices remain 100% decoupled from storage backends.
 - **Batching & Tail-Sampling Offloading:** Emitting spans synchronously over HTTP on every scrape or Kafka message introduces network overhead. The OTel Collector `batch` processor buffers spans in memory and compresses network flushes, while `memory_limiter` protects the collector against OOM spikes during scraping bursts.
+#### Why Ship Logs Through the Collector Instead of Directly to Loki?
+- **One egress path for all three signals:** Services already speak OTLP to the collector for traces and metrics. Adding logs to the same pipeline means one endpoint, one `memory_limiter` / `batch` policy, and one place to swap backends — the same vendor-agnostic argument as for traces.
+- **Native OTLP ingestion in Loki 3.x:** Loki exposes `/otlp/v1/logs`, so the collector uses the stock `otlphttp` exporter (the old contrib `loki` exporter is deprecated). Loki maps OTLP resource attributes such as `service.name` to the index label `service_name`, and stores log attributes (`trace_id`, `span_id`, MDC keys) as structured metadata.
+- **Automatic trace correlation:** The OpenTelemetry Logback appender reads the active OTel `Context` when a log event is emitted and stamps the record's `traceId` / `spanId` fields. Because Micrometer Tracing is bridged to OTel (Subtask 5.2) and `CoroutineTraceContext` restores the context after suspension, logs written on `Dispatchers.IO` or Kafka listener threads keep the correct trace.
+- **Console stays the source of truth locally:** The OTLP appender is added *alongside* the console appenders from Subtask 5.6, so `bootRun` output is unchanged and logging still works if the collector is down (the batch processor drops records once its queue is full instead of blocking application threads).
+
 - **Prometheus Exemplars:** When Micrometer records a latency histogram (e.g., `pulse_scraper_execution_duration_seconds`), it attaches the active `trace_id` as a Prometheus **Exemplar**. In Grafana, engineers can click a high-latency p99 spike directly on a Prometheus graph and jump straight to the exact distributed trace in Tempo.
 
 ### 3. Proposed Code
@@ -171,11 +183,11 @@ services:
       retries: 5
 
   # =========================================================================
-  # Phase 5: Observability Stack (OTel Collector, Tempo, Prometheus, Grafana)
+  # Phase 5: Observability Stack (OTel Collector, Tempo, Loki, Prometheus, Grafana)
   # =========================================================================
 
   tempo:
-    image: grafana/tempo:2.6.0
+    image: grafana/tempo:2.6.1
     container_name: pulse-tempo
     command: ["-config.file=/etc/tempo.yaml"]
     volumes:
@@ -183,6 +195,16 @@ services:
       - tempo_data:/var/tempo
     ports:
       - "3200:3200"   # Tempo HTTP query frontend
+
+  loki:
+    image: grafana/loki:3.5.0
+    container_name: pulse-loki
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./observability/loki.yaml:/etc/loki/loki.yaml:z
+      - loki_data:/loki
+    ports:
+      - "3100:3100"   # Loki HTTP API (push, query, /otlp)
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.111.0
@@ -196,9 +218,10 @@ services:
       - "8889:8889"   # Prometheus exporter metrics
     depends_on:
       - tempo
+      - loki
 
   prometheus:
-    image: prom/prometheus:v2.54.1
+    image: prom/prometheus:v3.6.0
     container_name: pulse-prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
@@ -215,7 +238,7 @@ services:
       - "9090:9090"
 
   grafana:
-    image: grafana/grafana:11.2.2
+    image: grafana/grafana:13.0.12
     container_name: pulse-grafana
     environment:
       - GF_SECURITY_ADMIN_USER=admin
@@ -231,10 +254,12 @@ services:
     depends_on:
       - prometheus
       - tempo
+      - loki
 
 volumes:
   timescaledb_data:
   tempo_data:
+  loki_data:
   prometheus_data:
   grafana_data:
 ```
@@ -266,6 +291,11 @@ exporters:
   prometheus:
     endpoint: "0.0.0.0:8889"
     namespace: pulse_otel
+  otlphttp/loki:
+    # Loki 3.x native OTLP ingestion; the exporter appends /v1/logs
+    endpoint: http://loki:3100/otlp
+    tls:
+      insecure: true
   debug:
     verbosity: basic
 
@@ -279,6 +309,10 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, batch]
       exporters: [prometheus]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/loki]
 ```
 
 #### File: `observability/tempo.yaml`
@@ -309,6 +343,55 @@ storage:
       path: /var/tempo/wal
     local:
       path: /var/tempo/blocks
+```
+
+#### File: `observability/loki.yaml`
+Single-binary Loki with filesystem storage, the TSDB `v13` schema (required for structured metadata and OTLP ingestion), and 7-day retention enforced by the compactor.
+```yaml
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: warn
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  allow_structured_metadata: true   # required for OTLP ingestion (trace_id / span_id)
+  volume_enabled: true
+  retention_period: 168h            # 7 days, aligned with Tempo's short local retention
+
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem
+
+pattern_ingester:
+  enabled: true                     # powers Grafana "Explore Logs" pattern detection
+
+analytics:
+  reporting_enabled: false
 ```
 
 #### File: `observability/prometheus.yml`
@@ -370,7 +453,34 @@ datasources:
     jsonData:
       tracesToMetrics:
         datasourceUid: prometheus
+      # Span -> Logs: open the Loki lines emitted inside the span's service and trace
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: "-2m"
+        spanEndTimeShift: "2m"
+        customQuery: true
+        query: '{service_name="$${__span.tags["service.name"]}"} | trace_id="$${__trace.traceId}"'
+      lokiSearch:
+        datasourceUid: loki
+
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+    isDefault: false
+    jsonData:
+      maxLines: 1000
+      # Log -> Trace: trace_id arrives as OTLP structured metadata, not inside the log line
+      derivedFields:
+        - name: TraceID
+          matcherType: label
+          matcherRegex: trace_id
+          datasourceUid: tempo
+          url: "$${__value.raw}"
+          urlDisplayLabel: "View trace in Tempo"
 ```
+> **Note:** Grafana provisioning expands `$VAR` / `${VAR}` from environment variables, so Grafana template variables must be escaped as `$${...}`.
 
 #### File: `observability/grafana/provisioning/dashboards/dashboards.yaml`
 ```yaml
@@ -461,6 +571,10 @@ subprojects {
         implementation("io.opentelemetry:opentelemetry-exporter-otlp")
         implementation("io.micrometer:context-propagation")
         implementation("net.logstash.logback:logstash-logback-encoder:7.4")
+        // OTLP log export: Logback -> OTel SDK -> Collector -> Loki.
+        // Keep this aligned with the opentelemetry version managed by the Spring Boot BOM
+        // (`./gradlew :pulse-api:dependencyInsight --dependency opentelemetry-sdk`).
+        implementation("io.opentelemetry.instrumentation:opentelemetry-logback-appender-1.0:2.3.0-alpha")
 
         testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
         testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
@@ -1419,11 +1533,18 @@ management:
 We are providing a unified `logback-spring.xml` configuration for `pulse-scraper`, `pulse-pipeline`, and `pulse-api` that supports two profiles:
 - **Default / Local Development:** Colorized console output enriched with `[service,traceId,spanId]` directly in every log line.
 - **`json-logs` / Production Profile:** Structured JSON logs via `LogstashEncoder` including `traceId`, `spanId`, `service`, thread, logger, and stack trace hashes.
+- **OTLP → Loki (both profiles):** An `OpenTelemetryAppender` that forwards every log event to the OpenTelemetry Collector, which exports it to Loki. A small `OtlpLogExportConfig` registers the OTLP log exporter with Spring Boot's auto-configured `SdkLoggerProvider` and installs the appender once the `OpenTelemetry` bean exists.
 
 ### 2. Why We Are Doing It & Deep Mechanics
 
 #### Log-to-Trace Correlation
 When an exception occurs in `NotificationDispatcher` or `PlaywrightHtmlFetcher`, operators searching logs need to know what triggered that execution upstream. Because Micrometer Tracing automatically populates SLF4J `MDC` keys `traceId` and `spanId` (and `CoroutineTraceContext` preserves them across suspension points), every single `log.info` / `log.error` line automatically embeds `[pulse-api,672f9a10b4c1e890a123456789abcdef,4123456789abcdef]`.
+
+#### Why Spring Boot 3.3 Needs `OtlpLogExportConfig`
+Spring Boot 3.3's `OpenTelemetryAutoConfiguration` already creates an `SdkLoggerProvider` and wires every `LogRecordProcessor` bean into it, but it does **not** auto-configure an OTLP *log* exporter (that arrives in Boot 3.4 as `management.otlp.logging.*`). We therefore:
+1. Declare an `OtlpHttpLogRecordExporter` pointing at the collector's `/v1/logs` endpoint, wrapped in a `BatchLogRecordProcessor` bean. It buffers records off-thread, so logging never blocks a Netty event loop or Kafka listener thread.
+2. Call `OpenTelemetryAppender.install(openTelemetry)` once the context starts. Logback is initialised **before** Spring creates the `OpenTelemetry` bean, so the appender cannot find the SDK on its own. Log events emitted before installation (early bootstrap lines) go only to the console, and that is acceptable.
+3. Rely on the appender to read the current OTel `Context`: records carry real `traceId` / `spanId` fields, which Loki stores as `trace_id` / `span_id` structured metadata. `captureMdcAttributes` additionally copies MDC keys for parity with the console output.
 
 ### 3. Proposed Code
 
@@ -1443,6 +1564,13 @@ When an exception occurs in `NotificationDispatcher` or `PlaywrightHtmlFetcher`,
         </encoder>
     </appender>
 
+    <!-- OTLP Appender: forwards every event to the OTel Collector -> Loki (installed by OtlpLogExportConfig) -->
+    <appender name="OTEL" class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender">
+        <captureExperimentalAttributes>true</captureExperimentalAttributes>
+        <captureCodeAttributes>false</captureCodeAttributes>
+        <captureMdcAttributes>*</captureMdcAttributes>
+    </appender>
+
     <!-- Structured JSON Appender for Production Log Aggregation -->
     <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder class="net.logstash.logback.encoder.LogstashEncoder">
@@ -1455,18 +1583,77 @@ When an exception occurs in `NotificationDispatcher` or `PlaywrightHtmlFetcher`,
     <springProfile name="!json-logs">
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="OTEL"/>
         </root>
     </springProfile>
 
     <springProfile name="json-logs">
         <root level="INFO">
             <appender-ref ref="JSON_CONSOLE"/>
+            <appender-ref ref="OTEL"/>
         </root>
     </springProfile>
 
     <logger name="com.pulseprice" level="DEBUG"/>
 </configuration>
 ```
+
+#### File: `pulse-scraper/src/main/kotlin/com/pulseprice/scraper/config/OtlpLogExportConfig.kt` (Copy also to `pulse-pipeline/.../pipeline/config/` and `pulse-api/.../api/config/`, adjusting the `package` line)
+```kotlin
+package com.pulseprice.scraper.config
+
+import io.opentelemetry.api.OpenTelemetry
+import io.opentelemetry.exporter.otlp.http.logs.OtlpHttpLogRecordExporter
+import io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender
+import io.opentelemetry.sdk.logs.export.BatchLogRecordProcessor
+import org.springframework.beans.factory.annotation.Value
+import org.springframework.boot.context.event.ApplicationStartedEvent
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
+import org.springframework.context.event.EventListener
+import java.time.Duration
+
+/**
+ * Ships Logback events to the OpenTelemetry Collector over OTLP/HTTP (collector -> Loki).
+ *
+ * Spring Boot 3.3 auto-configures the SdkLoggerProvider and adds every LogRecordProcessor bean to it,
+ * but it has no OTLP log exporter. This class supplies the exporter and installs the Logback appender.
+ */
+@Configuration(proxyBeanMethods = false)
+class OtlpLogExportConfig(
+    private val openTelemetry: OpenTelemetry,
+) {
+
+    @Bean
+    fun otlpLogRecordProcessor(
+        @Value("\${pulse.otel.logs.endpoint:http://localhost:4318/v1/logs}") endpoint: String,
+    ): BatchLogRecordProcessor {
+        val exporter = OtlpHttpLogRecordExporter.builder()
+            .setEndpoint(endpoint)
+            .setTimeout(Duration.ofSeconds(5))
+            .build()
+
+        return BatchLogRecordProcessor.builder(exporter)
+            .setMaxQueueSize(4096)                       // drop instead of blocking when the collector is down
+            .setScheduleDelay(Duration.ofSeconds(1))
+            .build()
+    }
+
+    @EventListener(ApplicationStartedEvent::class)
+    fun installLogbackAppender() {
+        OpenTelemetryAppender.install(openTelemetry)
+    }
+}
+```
+
+#### `application.yml` addition (all three services)
+```yaml
+pulse:
+  otel:
+    logs:
+      endpoint: ${OTEL_EXPORTER_OTLP_LOGS_ENDPOINT:http://localhost:4318/v1/logs}
+```
+> In `pulse-api/application.yml`, merge `otel` into the existing `pulse:` block instead of adding a second top-level `pulse:` key.
 
 ---
 
@@ -1663,9 +1850,15 @@ curl -s http://localhost:8000/actuator/prometheus | grep -E "pulse_api|http_serv
 
 # 3. Verify X-Trace-Id Header on Metasearch API Responses
 curl -i "http://localhost:8000/api/v1/products/search?q=sony&page=0&size=10"
+
+# 4. Verify Loki is ready and receiving OTLP logs (expect pulse-scraper, pulse-pipeline, pulse-api)
+curl -s http://localhost:3100/ready
+curl -s "http://localhost:3100/loki/api/v1/label/service_name/values" | jq .
 ```
 
 ### 3. Explore Distributed Traces & Dashboards in Grafana
 1. Open **Grafana** at `http://localhost:3000` (auto-logged in as `Admin`, or `admin` / `admin`).
 2. Navigate to **Dashboards -> PulsePrice -> PulsePrice — Distributed Metasearch & Alert Engine Overview** to view real-time scraper tier distributions, pipeline GTIN cache hit rates, and alert triggers.
 3. Navigate to **Explore -> Tempo** and search by the `X-Trace-Id` header returned from your API call or select a trace from `pulse-scraper` to inspect the full waterfall span across `pulse-scraper` $\rightarrow$ Kafka $\rightarrow$ `pulse-pipeline` $\rightarrow$ TimescaleDB $\rightarrow$ `pulse-api`.
+4. On any span, click **Logs for this span** to open the matching Loki lines (Trace → Logs).
+5. Navigate to **Explore -> Loki** and run `{service_name="pulse-api"} | trace_id != ""`. Expand a line and click **View trace in Tempo** on the `trace_id` field (Log → Trace).

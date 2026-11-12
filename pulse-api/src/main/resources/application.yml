@@ -8,7 +8,7 @@ spring:
 
 # Reactive PostgreSQL / TimescaleDB Connection Pool
   r2dbc:
-    url: r2dbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:pulseprice}
+    url: r2dbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5444}/${DB_NAME:pulseprice}
     username: ${DB_USER:pulse}
     password: ${DB_PASSWORD:pulsepass}
     pool:

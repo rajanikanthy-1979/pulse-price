@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: "PulsePrice Dashboards"
+    orgId: 1
+    folder: "PulsePrice"
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards

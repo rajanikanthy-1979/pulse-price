@@ -10,7 +10,7 @@ services:
       - "5444:5432"
     volumes:
       - timescaledb_data:/var/lib/postgresql/data
-      - ./init-scripts:/docker-entry-point-initdb.d:z
+      - ./init-scripts:/docker-entrypoint-initdb.d:z
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pulse -d pulseprice"]
       interval: 5s
@@ -57,10 +57,20 @@ services:
     container_name: pulse-tempo
     command: ["-config.file=/etc/tempo.yaml"]
     volumes:
-      - ./observability/tempo.yaml:z
+      - ./observability/tempo.yaml:/etc/tempo.yaml:z
       - tempo_data:/var/tempo
     ports:
       - "3200:3200"
+
+  loki:
+    image: grafana/loki:3.5.0
+    container_name: pulse-loki
+    command: ["--config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./observability/loki.yaml:/etc/loki/loki.yaml:z
+      - loki_data:/loki
+    ports:
+      - "3100:3100"
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.111.0
@@ -79,12 +89,12 @@ services:
     image: prom/prometheus:v3.6.0
     container_name: pulse-prometheus
     command:
-      - "--config.file=/etc/prometheus/prometheus.yamnl"
+      - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
       - "--enable-feature=exemplar-storage"
       - "--web.enable-remote-write-receiver"
     volumes:
-      - ./observability/prometheus.yaml:/etc/prometheus/prometheus.yml:z
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:z
       - prometheus_data:/prometheus
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -115,3 +125,4 @@ volumes:
   tempo_data:
   prometheus_data:
   grafana_data:
+  loki_data:
